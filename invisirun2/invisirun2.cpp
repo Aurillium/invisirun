@@ -8,7 +8,7 @@
 // concern, set this to a substring of the real arguments
 LPCWSTR FakeCommandLine = L"cmd.exe";
 // Path to real executable
-LPCWSTR NtImagePath = L"C:\\Windows\\System32\\cmd.exe";
+LPCWSTR ImagePath = L"C:\\Windows\\System32\\cmd.exe";
 // Real options we start the command with
 LPCWSTR RealCommandLine = L"cmd.exe /c powershell";
 
@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
 
     STARTUPINFO si = { 0 };
     PROCESS_INFORMATION pi = { 0 };
-    if (!CreateProcessW(NtImagePath, (PWSTR)L"cmd.exe", NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NEW_CONSOLE, NULL, L"C:\\Windows\\System32\\", &si, &pi)) {
+    if (!CreateProcessW(ImagePath, (PWSTR)FakeCommandLine, NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NEW_CONSOLE, NULL, L"C:\\Windows\\System32\\", &si, &pi)) {
         printf("Could not create new process.\n");
         return 1;
     }
