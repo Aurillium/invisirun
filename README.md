@@ -2,6 +2,8 @@
 
 ### A new and improved commandline spoofing PoC
 
+# Note: Invisirun2 is currently most effective
+
 ## What?
 Usually commandline spoofing requires the real arguments to be of equal or shorter length to the fake arguments that appear in logs, however this technique uses a low-level API to bypass this limitation, allowing users to execute commands up to 32767 characters while appearing as short as the cover command.
 
