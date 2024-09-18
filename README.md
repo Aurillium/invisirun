@@ -2,7 +2,8 @@
 
 ### A new and (hopefully) improved commandline spoofing PoC
 
-##### Quick note: This repo is synced every once in a while with a currently private other repo I'm working on, so commit messages are a bit cursed, and most of the non-inivisirun1 code is experimental and broken. `invisirun` is the project you want.
+> [!NOTE]
+> This repo is synced every once in a while with a currently private other repo I'm working on, so commit messages are a bit cursed, and most of the non-inivisirun1 code is experimental and broken. `invisirun` is the project you want.
 
 ## What?
 Usually commandline spoofing requires the real arguments to be of equal or shorter length to the fake arguments that appear in logs, however this technique uses a low-level API to bypass this limitation, allowing users to execute commands up to 32767 characters while appearing as short as the cover command to Sysmon.
@@ -12,6 +13,8 @@ This technique uses `NtCreateUserProcess` to start the process rather than `Crea
 
 ## Results?
 Because arguments and the executable path are completely separate in `NtCreateUserProcess`, we can run commands with any arguments, including none at all. It should be noted that in logging software, the executable path is usually shown and using a different executable path in the arguments may be more easily detected. Because the length requirements are now removed, commands of any length can be run and the cover arguments don't look padded in some logging software.
+
+![Notice the lack of whitespace after the command](https://github.com/user-attachments/assets/d2cb41b3-567d-4f8c-89e6-137b7a5d1ea8)
 
 System Informer updates the "Command line" field on every write to the PEB, so this will be updated to the new argument buffer, but to mitigate this invisirun will set the length of the internal `UNICODE_STRING` to the length of the cover arguments so that the cover command can be set to the beginning of the real command and System Informer and logging software will match.
 Other PoCs write the fake arguments back to the process, which could be implemented fairly easily here too.
