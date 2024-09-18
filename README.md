@@ -2,7 +2,7 @@
 
 ### A new and (hopefully) improved commandline spoofing PoC
 
-##### Quick note: This repo is synced every once in a while with a currently private other repo I'm working on, so commit messages are a bit cursed, and most of the projects are experimental and not working. `invisirun` is the project you want.
+##### Quick note: This repo is synced every once in a while with a currently private other repo I'm working on, so commit messages are a bit cursed, and most of the non-inivisirun1 code is experimental and broken. `invisirun` is the project you want.
 
 ## What?
 Usually commandline spoofing requires the real arguments to be of equal or shorter length to the fake arguments that appear in logs, however this technique uses a low-level API to bypass this limitation, allowing users to execute commands up to 32767 characters while appearing as short as the cover command to Sysmon.
@@ -18,6 +18,20 @@ Other PoCs write the fake arguments back to the process, which could be implemen
 
 ### The Problem
 Unfortunately since 4688 security log EVIDs don't work on my testing VM, I did not realise at first that I've actually made the exploit more detectable in Windows Security Logs. So although the trailing spaces are gone from Sysmon, they seem to appear as newlines in security logs.
+
+## How Use?
+All you need to do is change these three global variables in the source, then compile and run
+```c
+// Commandline options that get logged
+LPCWSTR FakeCommandLine = L"cmd.exe";
+// Path to real executable
+LPCWSTR NtImagePath = L"\\??\\C:\\Windows\\System32\\cmd.exe";
+// Real options we start the command with
+LPCWSTR RealCommandLine = L"cmd.exe /c powershell";
+```
+Please do not use for evil, or expect it to be particularly good at evading detection in pentesting.
+
+Invisirun2 is very experimental at the moment, it won't work currently and may not ever work, but I'm experimenting and seeing what else I can do.
 
 ## Credits
 
